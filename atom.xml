@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>John&#39;s Blog</title>
+  
+  <link href="/atom.xml" rel="self"/>
+  
+  <link href="https://github.com/wywincl/"/>
+  <updated>2016-04-10T05:55:38.000Z</updated>
+  <id>https://github.com/wywincl/</id>
+  
+  <author>
+    <name>John.Wang</name>
+    
+  </author>
+  
+  <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>Robot Framework如何使用C语言编写测试库</title>
+    <link href="https://github.com/wywincl/2016/04/10/Robot-Framework%E5%A6%82%E4%BD%95%E4%BD%BF%E7%94%A8C%E8%AF%AD%E8%A8%80%E7%BC%96%E5%86%99%E6%B5%8B%E8%AF%95%E5%BA%93/"/>
+    <id>https://github.com/wywincl/2016/04/10/Robot-Framework如何使用C语言编写测试库/</id>
+    <published>2016-04-10T05:54:30.000Z</published>
+    <updated>2016-04-10T05:55:38.000Z</updated>
+    
+    <content type="html">&lt;h2 id=&quot;介绍&quot;&gt;&lt;a href=&quot;#介绍&quot; class=&quot;headerlink&quot; title=&quot;介绍&quot;&gt;&lt;/a&gt;介绍&lt;/h2&gt;&lt;p&gt;这里通过一个简单的例子，演示如何在Robot Framework 的测试库中使用C语言。我们使用Python标准库中的ctypes模块（对于早期Python版本可能未集成，需要另行安装），该模块需要调用C代码编写的共享库。当前的例子我仅在OSX上实现与测试，对于Unix和Linux平台大同小异，对于Windows平台，仅仅需要注意共享库的格式和调用方式即可，当前未做其他平台相关测试。&lt;/p&gt;
+&lt;h2 id=&quot;共享库&quot;&gt;&lt;a href=&quot;#共享库&quot; class=&quot;headerlink&quot; title=&quot;共享库&quot;&gt;&lt;/a&gt;共享库&lt;/h2&gt;&lt;p&gt;第一步，我们需要编写C的共享库。&lt;/p&gt;
+&lt;p&gt;我们编写的例子是一个非常简单的登录系统（login.c), 通过输入的用户名和密码进行验证，并返回验证结果。这里有两组合法的用户名密码组合：demo/mode和john/long.其他组合都是错误的。下面是login.c的完整代码：&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;/*
+Simple system that validates passwords and user names. There are two users in
+system with valid user name and password. &amp;quot;demo mode&amp;quot; and &amp;quot;john long&amp;quot;. All
+other user names are invalid. Except that there are bugs. Can you spot them?
+*/
+
+#include &amp;lt;string.h&amp;gt;
+#define NR_USERS 2
+
+struct User {
+    const char* name;
+    const char* password;
+};
+const struct User VALID_USERS[NR_USERS] = { &amp;quot;john&amp;quot;, &amp;quot;long&amp;quot;, &amp;quot;demo&amp;quot;, &amp;quot;mode&amp;quot; };
+
+int validate_user(const char* name, const char* password) {
+    int i;
+    for (i = 0; i &amp;lt; NR_USERS; i++) {
+        if (0 == strncmp(VALID_USERS[i].name, name, strlen(VALID_USERS[i].name)))
+            if (0 == strncmp(VALID_USERS[i].password, password,     strlen(VALID_USERS[i].password)))
+                return 1;
+       }
+        return 0;
+}
+&lt;/code&gt;&lt;/pre&gt;&lt;p&gt;我们将这个文件编译成共享库liblogin.so. 在当前目录下，我们创建Makefile文件。&lt;br&gt;Makefile编写如下：&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;CC=gcc
+SRC=login.c
+SO=liblogin.so
+
+$(SO): $(SRC)
+    $(CC) -fPIC -shared -o $(SO) $(SRC)
+
+clean:
+    rm -f $(SO)
+&lt;/code&gt;&lt;/pre&gt;&lt;p&gt;我们在当前目录执行make命令，就创建了共享库liblogin.so.&lt;br&gt;后面我们将介绍如何编写Robot Framework测试库来调用我们的C共享库。&lt;/p&gt;
+&lt;h2 id=&quot;测试库&quot;&gt;&lt;a href=&quot;#测试库&quot; class=&quot;headerlink&quot; title=&quot;测试库&quot;&gt;&lt;/a&gt;测试库&lt;/h2&gt;&lt;p&gt;在这里，我们按照Robot框架的规范，来编写测试库LoginLibrary.py. LoginLibrary是一个简单的测试库，通过ctypes模块来与底层的C共享库进行交互。我们这个库仅仅提供了一个关键字就是 &lt;strong&gt;&lt;em&gt;Check User&lt;/em&gt;&lt;/strong&gt;.&lt;/p&gt;
+&lt;p&gt;下面是LoginLibrary.py的完整代码：&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;&amp;quot;&amp;quot;&amp;quot;Robot Framework test library example that calls C code.
+
+This example uses Python&amp;apos;s standard `ctypes` module, which requires
+that the C code is compiled into a shared library.
+
+It is also possible to execute this file from the command line 
+to test the C code manually.
+&amp;quot;&amp;quot;&amp;quot;
+
+from ctypes import CDLL, c_char_p
+
+LIBRARY = CDLL(&amp;apos;./liblogin.so&amp;apos;)  # On Windows we&amp;apos;d use &amp;apos;.dll&amp;apos;
+
+
+def check_user(username, password):
+    &amp;quot;&amp;quot;&amp;quot;Validates user name and password using imported shared C library.&amp;quot;&amp;quot;&amp;quot;
+    if not LIBRARY.validate_user(c_char_p(username), c_char_p(password)):
+        raise AssertionError(&amp;apos;Wrong username/password combination&amp;apos;)
+
+
+if __name__ == &amp;apos;__main__&amp;apos;:
+    import sys
+    try:
+        check_user(*sys.argv[1:])
+    except TypeError:
+         print &amp;apos;Usage:  %s username password&amp;apos; % sys.argv[0]
+    except AssertionError, err:
+        print err
+    else:
+        print &amp;apos;Valid password&amp;apos;
+&lt;/code&gt;&lt;/pre&gt;&lt;p&gt;&lt;code&gt;if __name__ == &amp;#39;__main__&amp;#39;&lt;/code&gt; 语句块不是用于测试库的，我们在这里写是为了方便测试测试库，我们可以执行如下的测试命令：&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;python LoginLibrary.py demo mode
+python LoginLibrary.py demo invalid
+&lt;/code&gt;&lt;/pre&gt;&lt;p&gt;来验证我们的测试库编写是否正确，不过对于正式的测试库，我们需要进行单元测试utest和验收测试atest.这里就不做过多介绍了。编写好测试库以后，我们就可以利用测试库提供的关键字编写用例了。&lt;/p&gt;
+&lt;h2 id=&quot;测试用例&quot;&gt;&lt;a href=&quot;#测试用例&quot; class=&quot;headerlink&quot; title=&quot;测试用例&quot;&gt;&lt;/a&gt;测试用例&lt;/h2&gt;&lt;p&gt;我们按照Robot框架的规范，编写测试用例login_tests.robot, 用例完整代码如下所示：&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;*** Settings ***
+Library           LoginLibrary.py
+
+*** Test Case ***
+Validate Users
+    [Template]    Check Valid User
+    johns    long
+    demo     mode
+
+Login With Invalid User Should Fail
+    [Template]    Check Invalid User
+    de          mo
+    invalid     invalid
+    long        invalid
+    ${EMPTY}    ${EMPTY}
+
+*** Keyword ***
+Check Valid User
+    [Arguments]    ${username}    ${password}
+    Check User    ${username}    ${password}
+
+Check Invalid User
+    [Arguments]    ${username}    ${password}
+    Run Keyword And Expect Error    Wrong username/password combination    Check     User    ${username}    ${password}
+&lt;/code&gt;&lt;/pre&gt;&lt;p&gt;我们的测试集包含了所有的测试情况，包括独立的有效登录测试和无效登录测试。&lt;br&gt;注意，尽管我们的测试用例文件以显示的.robot扩展结尾，它实际上也是文本文件。我们以.txt结尾，Robot框架同样可以执行。用例编写完了，我们开始执行测试用例。&lt;/p&gt;
+&lt;h2 id=&quot;执行测试&quot;&gt;&lt;a href=&quot;#执行测试&quot; class=&quot;headerlink&quot; title=&quot;执行测试&quot;&gt;&lt;/a&gt;执行测试&lt;/h2&gt;&lt;p&gt;首先要确保已经安装了Robot Framework了，这里我就不介绍怎么安装了，相信大家应该都安装成功了。通过pybot –version查看即可。&lt;/p&gt;
+&lt;p&gt;我们在控制台上输入如下命令，执行测试：&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;&amp;gt;pybot login_tests.robot
+&lt;/code&gt;&lt;/pre&gt;&lt;p&gt; pybot命令有很多参数可选，这里为了方便，我们就选用默认即可。&lt;/p&gt;
+&lt;p&gt; 执行结果如下：&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt; ==============================================================================
+Login Tests                                                                   
+==============================================================================
+Validate Users                                                        | PASS |
+------------------------------------------------------------------------------
+Login With Invalid User Should Fail                                   | PASS |
+------------------------------------------------------------------------------
+Login Tests                                                           | PASS |
+2 critical tests, 2 passed, 0 failed
+2 tests total, 2 passed, 0 failed
+==============================================================================
+Output:  ../output.xml
+Log:     ../log.html
+Report:  ../report.html
+&lt;/code&gt;&lt;/pre&gt;&lt;p&gt;通过查看输出的html日志和报告文件，我们可以查看用例的执行情况。&lt;/p&gt;
+&lt;p&gt;至此，我们就简单的介绍完了如何在Robot Framework测试库中调用C库的用法。&lt;/p&gt;
+</content>
+    
+    <summary type="html">
+    
+      &lt;h2 id=&quot;介绍&quot;&gt;&lt;a href=&quot;#介绍&quot; class=&quot;headerlink&quot; title=&quot;介绍&quot;&gt;&lt;/a&gt;介绍&lt;/h2&gt;&lt;p&gt;这里通过一个简单的例子，演示如何在Robot Framework 的测试库中使用C语言。我们使用Python标准库中的ctypes模块（对于
+    
+    </summary>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>Hello World</title>
+    <link href="https://github.com/wywincl/2016/04/10/hello-world/"/>
+    <id>https://github.com/wywincl/2016/04/10/hello-world/</id>
+    <published>2016-04-10T02:43:53.000Z</published>
+    <updated>2016-04-10T02:43:53.000Z</updated>
+    
+    <content type="html">&lt;p&gt;Welcome to &lt;a href=&quot;https://hexo.io/&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;Hexo&lt;/a&gt;! This is your very first post. Check &lt;a href=&quot;https://hexo.io/docs/&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;documentation&lt;/a&gt; for more info. If you get any problems when using Hexo, you can find the answer in &lt;a href=&quot;https://hexo.io/docs/troubleshooting.html&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;troubleshooting&lt;/a&gt; or you can ask me on &lt;a href=&quot;https://github.com/hexojs/hexo/issues&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
+&lt;h2 id=&quot;Quick-Start&quot;&gt;&lt;a href=&quot;#Quick-Start&quot; class=&quot;headerlink&quot; title=&quot;Quick Start&quot;&gt;&lt;/a&gt;Quick Start&lt;/h2&gt;&lt;h3 id=&quot;Create-a-new-post&quot;&gt;&lt;a href=&quot;#Create-a-new-post&quot; class=&quot;headerlink&quot; title=&quot;Create a new post&quot;&gt;&lt;/a&gt;Create a new post&lt;/h3&gt;&lt;figure class=&quot;highlight bash&quot;&gt;&lt;table&gt;&lt;tr&gt;&lt;td class=&quot;gutter&quot;&gt;&lt;pre&gt;&lt;span class=&quot;line&quot;&gt;1&lt;/span&gt;&lt;br&gt;&lt;/pre&gt;&lt;/td&gt;&lt;td class=&quot;code&quot;&gt;&lt;pre&gt;&lt;span class=&quot;line&quot;&gt;$ hexo new &lt;span class=&quot;string&quot;&gt;&quot;My New Post&quot;&lt;/span&gt;&lt;/span&gt;&lt;br&gt;&lt;/pre&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;/figure&gt;
+&lt;p&gt;More info: &lt;a href=&quot;https://hexo.io/docs/writing.html&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;Writing&lt;/a&gt;&lt;/p&gt;
+&lt;h3 id=&quot;Run-server&quot;&gt;&lt;a href=&quot;#Run-server&quot; class=&quot;headerlink&quot; title=&quot;Run server&quot;&gt;&lt;/a&gt;Run server&lt;/h3&gt;&lt;figure class=&quot;highlight bash&quot;&gt;&lt;table&gt;&lt;tr&gt;&lt;td class=&quot;gutter&quot;&gt;&lt;pre&gt;&lt;span class=&quot;line&quot;&gt;1&lt;/span&gt;&lt;br&gt;&lt;/pre&gt;&lt;/td&gt;&lt;td class=&quot;code&quot;&gt;&lt;pre&gt;&lt;span class=&quot;line&quot;&gt;$ hexo server&lt;/span&gt;&lt;br&gt;&lt;/pre&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;/figure&gt;
+&lt;p&gt;More info: &lt;a href=&quot;https://hexo.io/docs/server.html&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;Server&lt;/a&gt;&lt;/p&gt;
+&lt;h3 id=&quot;Generate-static-files&quot;&gt;&lt;a href=&quot;#Generate-static-files&quot; class=&quot;headerlink&quot; title=&quot;Generate static files&quot;&gt;&lt;/a&gt;Generate static files&lt;/h3&gt;&lt;figure class=&quot;highlight bash&quot;&gt;&lt;table&gt;&lt;tr&gt;&lt;td class=&quot;gutter&quot;&gt;&lt;pre&gt;&lt;span class=&quot;line&quot;&gt;1&lt;/span&gt;&lt;br&gt;&lt;/pre&gt;&lt;/td&gt;&lt;td class=&quot;code&quot;&gt;&lt;pre&gt;&lt;span class=&quot;line&quot;&gt;$ hexo generate&lt;/span&gt;&lt;br&gt;&lt;/pre&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;/figure&gt;
+&lt;p&gt;More info: &lt;a href=&quot;https://hexo.io/docs/generating.html&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;Generating&lt;/a&gt;&lt;/p&gt;
+&lt;h3 id=&quot;Deploy-to-remote-sites&quot;&gt;&lt;a href=&quot;#Deploy-to-remote-sites&quot; class=&quot;headerlink&quot; title=&quot;Deploy to remote sites&quot;&gt;&lt;/a&gt;Deploy to remote sites&lt;/h3&gt;&lt;figure class=&quot;highlight bash&quot;&gt;&lt;table&gt;&lt;tr&gt;&lt;td class=&quot;gutter&quot;&gt;&lt;pre&gt;&lt;span class=&quot;line&quot;&gt;1&lt;/span&gt;&lt;br&gt;&lt;/pre&gt;&lt;/td&gt;&lt;td class=&quot;code&quot;&gt;&lt;pre&gt;&lt;span class=&quot;line&quot;&gt;$ hexo deploy&lt;/span&gt;&lt;br&gt;&lt;/pre&gt;&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;&lt;/figure&gt;
+&lt;p&gt;More info: &lt;a href=&quot;https://hexo.io/docs/deployment.html&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;Deployment&lt;/a&gt;&lt;/p&gt;
+</content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;Welcome to &lt;a href=&quot;https://hexo.io/&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;Hexo&lt;/a&gt;! This is your very first post. Check &lt;a href=&quot;https://hexo.
+    
+    </summary>
+    
+    
+  </entry>
+  
+</feed>
